@@ -23,7 +23,10 @@ correct **OR** semantics, and drive the
 - **Structured channel for the Period Comparison chart** — the ranges are
   additionally emitted in `extra_form_data.custom_form_data`; the
   comparison chart picks them up (its pickers are replaced by a
-  "Periods from filter" plaque when the filter is in scope).
+  "Periods from filter" plaque when the filter is in scope). A
+  presence-only marker entry is emitted even while no ranges are
+  selected, so comparison charts defer to the filter immediately, and
+  "Clear all" does not bring the pickers back.
 - **Scope** — standard native-filter scoping UI (all charts or a subset).
 
 ## Requirements

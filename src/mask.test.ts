@@ -60,7 +60,7 @@ test("valid periods emit one tagged OR clause and the structured ranges", () => 
   expect(mask.ownState.periods).toEqual(periods);
 });
 
-test("an invalid set clears the filter but the clause needs a column", () => {
+test("an invalid set emits the presence marker and clears the filter", () => {
   const unequal = buildPeriodRangesMask(
     [
       { start: "2026-01-05", end: "2026-01-09" },
@@ -69,18 +69,28 @@ test("an invalid set clears the filter but the clause needs a column", () => {
     "ds",
   );
   expect(unequal.extraFormData.adhoc_filters).toEqual([]);
-  expect(unequal.extraFormData.custom_form_data).toEqual([]);
+  expect(unequal.extraFormData.custom_form_data).toEqual([{ col: "ds" }]);
   expect(unequal.filterState.value).toBeNull();
-
-  const noCol = buildPeriodRangesMask(periods, undefined);
-  expect(noCol.extraFormData.adhoc_filters).toEqual([]);
-  expect(noCol.extraFormData.custom_form_data).toEqual([]);
 });
 
-test("an empty list clears the filter and resets the persisted pickers", () => {
+test("an empty list emits the presence marker too", () => {
   const mask = buildPeriodRangesMask([], "ds");
   expect(mask.extraFormData.adhoc_filters).toEqual([]);
-  expect(mask.extraFormData.custom_form_data).toEqual([]);
+  expect(mask.extraFormData.custom_form_data).toEqual([{ col: "ds" }]);
+  expect(mask.filterState.value).toBeNull();
+  expect(mask.ownState.periods).toEqual([]);
+});
+
+test("the presence marker is emitted even without a configured column", () => {
+  const mask = buildPeriodRangesMask(periods, undefined);
+  expect(mask.extraFormData.adhoc_filters).toEqual([]);
+  expect(mask.extraFormData.custom_form_data).toEqual([{ col: "" }]);
+});
+
+test("the presence marker works without a configured column too", () => {
+  const mask = buildPeriodRangesMask([], undefined);
+  expect(mask.extraFormData.adhoc_filters).toEqual([]);
+  expect(mask.extraFormData.custom_form_data).toEqual([{ col: "" }]);
   expect(mask.filterState.value).toBeNull();
   expect(mask.ownState.periods).toEqual([]);
 });

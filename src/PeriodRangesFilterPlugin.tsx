@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { t } from '@apache-superset/core/translation';
 import { useTheme } from '@apache-superset/core/theme';
 import { ensureIsArray } from '@superset-ui/core';
@@ -85,6 +85,16 @@ export default function PeriodRangesFilterPlugin(
     addPeriod,
     removePeriod,
   } = usePeriodsList({ value, onCommit });
+
+  // Re-assert the presence marker after a framework reset (Clear all,
+  // dashboard load): comparison charts in scope must keep deferring to
+  // this filter even while it has no ranges selected.
+  useEffect(() => {
+    const persisted = (ownState as { periods?: unknown } | undefined)?.periods;
+    if (!Array.isArray(persisted)) {
+      setDataMask(buildPeriodRangesMask([], col));
+    }
+  }, [ownState, col, setDataMask]);
 
   const { errors, warnings } = validationMessages(validation);
   const hasIssues = errors.length > 0 || warnings.length > 0;

@@ -110,9 +110,11 @@ export function buildTaggedRangesClause(
 }
 
 /**
- * Full data mask of the filter. Empty/invalid periods clear the filter
- * (NO_TIME_RANGE) but keep the picker state in ownState so it survives
- * dashboard reloads.
+ * Full data mask of the filter. Empty/invalid periods emit a presence-only
+ * marker entry (`{ col }` without dates) so that every period comparison
+ * chart in scope knows the filter EXISTS and hides its own pickers, while
+ * the filter itself applies nothing (NO_TIME_RANGE). The picker state
+ * persists in ownState and survives dashboard reloads.
  */
 export function buildPeriodRangesMask(
   periods: PeriodRange[],
@@ -120,11 +122,13 @@ export function buildPeriodRangesMask(
 ): DataMaskLike {
   const { periods: validated } = validatePeriods(periods);
   const valid = validated.length > 0 && Boolean(col);
-  const entries: RangeEntry[] = validated.map(period => ({
-    col: col || "",
-    start: toIso(period.startMs),
-    end: toIso(period.endMs),
-  }));
+  const entries: RangeEntry[] = valid
+    ? validated.map(period => ({
+        col: col || "",
+        start: toIso(period.startMs),
+        end: toIso(period.endMs),
+      }))
+    : [{ col: col || "" }]; // presence-only marker (no dates)
   return {
     // persisted picker state: the pickers restore from here on remount
     ownState: { periods: periods.map(({ start, end }) => ({ start, end })) },
@@ -142,7 +146,7 @@ export function buildPeriodRangesMask(
             },
           ]
         : [],
-      custom_form_data: valid ? entries : [],
+      custom_form_data: entries,
     },
     filterState: {
       value: valid ? spanFilterValue(validated) : null,
