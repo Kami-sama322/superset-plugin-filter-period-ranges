@@ -1,0 +1,36 @@
+{
+  "name": "@superset-ui/plugin-filter-period-ranges",
+  "version": "1.0.0",
+  "description": "Superset native filter plugin: 1-5 arbitrary equal-length date ranges that cross-filter dashboard charts (OR semantics) and drive the period comparison chart",
+  "keywords": [
+    "superset",
+    "filter",
+    "native-filter",
+    "date-range",
+    "period"
+  ],
+  "homepage": "https://github.com/Kami-sama322/superset-plugin-filter-period-ranges",
+  "bugs": {
+    "url": "https://github.com/Kami-sama322/superset-plugin-filter-period-ranges/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kami-sama322/superset-plugin-filter-period-ranges.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Alexander Tsay",
+  "sideEffects": false,
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "files": ["src"],
+  "dependencies": {
+    "dayjs": "^1.11.19"
+  },
+  "peerDependencies": {
+    "@apache-superset/core": "*",
+    "@superset-ui/chart-controls": "*",
+    "@superset-ui/core": "*",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2"
+  }
+}
