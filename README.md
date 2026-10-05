@@ -15,6 +15,9 @@ correct **OR** semantics, and drive the
   filtered by `range1 OR range2 OR …`. Superset's native `TEMPORAL_RANGE`
   clauses are AND-combined, so the filter emits a single tagged adhoc SQL
   clause: `/* period_ranges:v1 */ (col >= 'S1' AND col < 'E1') OR (…)`.
+  The clause stays sargable (index range scans / BitmapOr) and
+  overlapping or adjacent ranges are merged into a minimal disjoint set
+  before emission, so the predicate never grows with redundant branches.
 - **Equal-length validation** — all ranges must have the same duration
   (blocking, inline error); overlaps warn; at least one picker stays.
 - **Structured channel for the Period Comparison chart** — the ranges are

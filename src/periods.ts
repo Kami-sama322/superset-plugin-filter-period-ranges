@@ -21,6 +21,9 @@
  * Pure date-range math for period comparison. No runtime dependencies so it
  * stays unit-testable outside the Superset tree.
  *
+ * KEEP IN SYNC with superset-plugin-chart-period-comparison/src/periods.ts
+ * (shared contract: this file is a copy — change both repos together).
+ *
  * Conventions:
  * - All math is done on UTC epoch milliseconds; naive wall-clock strings
  *   ("YYYY-MM-DD" / "YYYY-MM-DD HH:mm") are parsed as UTC to match the
@@ -295,6 +298,71 @@ export type ValidatedPeriod = {
   endMs: number;
 };
 
+/** Where the rendered periods come from */
+export type PeriodsSource = "filter" | "own" | "config";
+
+/**
+ * Tag prefix of the OR clause emitted by the `period_ranges` native filter
+ * (superset-plugin-filter-period-ranges). Tagged clauses target OTHER
+ * charts and must be stripped from this chart's base filters.
+ */
+export const PERIOD_RANGES_TAG = "/* period_ranges:v1 */";
+
+/**
+ * Structured ranges emitted by the `period_ranges` native filter via
+ * `extra_form_data.custom_form_data` (an APPEND key that reaches every
+ * in-scope chart's formData verbatim).
+ */
+export function extractFilterPeriods(extraFormData: unknown): PeriodRange[] {
+  const bag = (extraFormData || {}) as { custom_form_data?: unknown };
+  const list = bag.custom_form_data;
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  return list
+    .map(entry => {
+      const source = (entry || {}) as Record<string, unknown>;
+      return {
+        start: typeof source.start === "string" ? source.start : "",
+        end: typeof source.end === "string" ? source.end : "",
+      };
+    })
+    .filter(period => period.start !== "" || period.end !== "");
+}
+
+/** Remove the filter's tagged OR clauses from this chart's base filters */
+export function stripTaggedPeriodRangeFilters(adhocFilters: unknown): unknown[] {
+  if (!Array.isArray(adhocFilters)) {
+    return [];
+  }
+  return adhocFilters.filter(item => {
+    const sql = (item as { sqlExpression?: unknown })?.sqlExpression;
+    return !(typeof sql === "string" && sql.startsWith(PERIOD_RANGES_TAG));
+  });
+}
+
+/**
+ * Authoritative source of the displayed/queried periods, highest priority
+ * first: the period_ranges native filter (structured channel), the
+ * dashboard ownState (the on-chart pickers), the control-panel value.
+ */
+export function resolvePeriodsSource(
+  ownState: { periods?: unknown } | null | undefined,
+  formPeriods: unknown,
+  filterPeriods: PeriodRange[] = [],
+): { periods: PeriodRange[]; source: PeriodsSource } {
+  if (filterPeriods.length > 0) {
+    return { periods: filterPeriods, source: "filter" };
+  }
+  if (ownState && Array.isArray(ownState.periods)) {
+    return { periods: ownState.periods as PeriodRange[], source: "own" };
+  }
+  return {
+    periods: Array.isArray(formPeriods) ? (formPeriods as PeriodRange[]) : [],
+    source: "config",
+  };
+}
+
 /** Structured validation issues; UI translates them via t() */
 export type ValidationIssue =
   | { type: "invalid_dates"; index: number }
@@ -325,21 +393,6 @@ export function parseGrain(value: unknown): ComparisonGrain {
     value === "year"
     ? value
     : "day";
-}
-
-/**
- * Authoritative source of the displayed/queried periods: dashboard runtime
- * ownState (the on-chart pickers) wins as soon as it carries a `periods`
- * key, the control-panel value is the default.
- */
-export function resolvePeriodsSource(
-  ownState: { periods?: unknown } | null | undefined,
-  formPeriods: unknown,
-): PeriodRange[] {
-  if (ownState && Array.isArray(ownState.periods)) {
-    return ownState.periods as PeriodRange[];
-  }
-  return Array.isArray(formPeriods) ? (formPeriods as PeriodRange[]) : [];
 }
 
 /**

@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Behavior, DataRecord, FilterState, QueryFormData, SetDataMaskHook } from '@superset-ui/core';
+import { Behavior, DataRecord, FilterState, QueryFormData, SetDataMaskHook, JsonObject } from '@superset-ui/core';
 import { RefObject } from 'react';
 import type { PeriodRange } from './periods';
 
@@ -55,6 +55,8 @@ export type PluginFilterPeriodRangesProps = PluginFilterStylesProps & {
   filterState: FilterState;
   formData: PluginFilterPeriodRangesQueryFormData;
   inputRef: RefObject<HTMLInputElement>;
+  /** Persisted picker state (restored after dashboard reloads) */
+  ownState: JsonObject;
   filterBarOrientation?: FilterBarOrientation;
   isOverflowingFilterBar?: boolean;
 } & PluginFilterHooks;

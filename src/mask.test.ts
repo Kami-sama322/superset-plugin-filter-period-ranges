@@ -19,6 +19,7 @@
 import {
   buildPeriodRangesMask,
   buildTaggedRangesClause,
+  mergeRanges,
   PERIOD_RANGES_TAG,
 } from "./mask";
 
@@ -55,6 +56,8 @@ test("valid periods emit one tagged OR clause and the structured ranges", () => 
     "2026-01-05 00:00:00 : 2026-02-07 00:00:00",
   );
   expect(mask.filterState.label).toContain("05.01");
+  // the pickers restore from ownState after dashboard reloads
+  expect(mask.ownState.periods).toEqual(periods);
 });
 
 test("an invalid set clears the filter but the clause needs a column", () => {
@@ -74,12 +77,12 @@ test("an invalid set clears the filter but the clause needs a column", () => {
   expect(noCol.extraFormData.custom_form_data).toEqual([]);
 });
 
-test("an empty list clears the filter", () => {
+test("an empty list clears the filter and resets the persisted pickers", () => {
   const mask = buildPeriodRangesMask([], "ds");
   expect(mask.extraFormData.adhoc_filters).toEqual([]);
   expect(mask.extraFormData.custom_form_data).toEqual([]);
   expect(mask.filterState.value).toBeNull();
-  expect(mask.ownState).toEqual({});
+  expect(mask.ownState.periods).toEqual([]);
 });
 
 test("buildTaggedRangesClause joins per-range clauses with OR", () => {
@@ -88,5 +91,61 @@ test("buildTaggedRangesClause joins per-range clauses with OR", () => {
   ]);
   expect(clause).toBe(
     `${PERIOD_RANGES_TAG} (events.dt >= '2026-01-05 00:00:00' AND events.dt < '2026-01-10 00:00:00')`,
+  );
+});
+
+test("mergeRanges collapses overlapping and adjacent ranges", () => {
+  const utc = (d: number) => Date.UTC(2026, 0, d);
+  const endOfDay = (d: number) => Date.UTC(2026, 0, d) + 86399999;
+  // overlapping
+  expect(
+    mergeRanges([
+      { startMs: utc(5), endMs: endOfDay(9) },
+      { startMs: utc(7), endMs: endOfDay(12) },
+    ]),
+  ).toEqual([{ startMs: utc(5), endExclusiveMs: utc(13) }]);
+  // adjacent: next start == previous exclusive end
+  expect(
+    mergeRanges([
+      { startMs: utc(5), endMs: endOfDay(9) },
+      { startMs: utc(10), endMs: endOfDay(12) },
+    ]),
+  ).toEqual([{ startMs: utc(5), endExclusiveMs: utc(13) }]);
+  // disjoint ranges survive sorted
+  expect(
+    mergeRanges([
+      { startMs: utc(10), endMs: endOfDay(12) },
+      { startMs: utc(1), endMs: endOfDay(3) },
+    ]),
+  ).toEqual([
+    { startMs: utc(1), endExclusiveMs: utc(4) },
+    { startMs: utc(10), endExclusiveMs: utc(13) },
+  ]);
+  // duplicates collapse into one
+  expect(
+    mergeRanges([
+      { startMs: utc(5), endMs: endOfDay(9) },
+      { startMs: utc(5), endMs: endOfDay(9) },
+    ]),
+  ).toEqual([{ startMs: utc(5), endExclusiveMs: utc(10) }]);
+});
+
+test("the emitted clause uses merged ranges", () => {
+  const clause = buildTaggedRangesClause("ds", [
+    { startMs: Date.UTC(2026, 0, 5), endMs: Date.UTC(2026, 0, 9, 23, 59, 59, 999) },
+    { startMs: Date.UTC(2026, 0, 10), endMs: Date.UTC(2026, 0, 12, 23, 59, 59, 999) },
+  ]);
+  expect(clause).toBe(
+    `${PERIOD_RANGES_TAG} (ds >= '2026-01-05 00:00:00' AND ds < '2026-01-13 00:00:00')`,
+  );
+});
+
+test("overlapping periods produce a merged clause", () => {
+  const clause = buildTaggedRangesClause("ds", [
+    { startMs: Date.UTC(2026, 0, 5), endMs: Date.UTC(2026, 0, 12, 23, 59, 59, 999) },
+    { startMs: Date.UTC(2026, 0, 7), endMs: Date.UTC(2026, 0, 9, 23, 59, 59, 999) },
+  ]);
+  expect(clause).toBe(
+    `${PERIOD_RANGES_TAG} (ds >= '2026-01-05 00:00:00' AND ds < '2026-01-13 00:00:00')`,
   );
 });

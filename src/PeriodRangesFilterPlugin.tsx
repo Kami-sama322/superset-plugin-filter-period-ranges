@@ -18,6 +18,7 @@
  */
 import { useCallback, useMemo } from 'react';
 import { t } from '@apache-superset/core/translation';
+import { useTheme } from '@apache-superset/core/theme';
 import { ensureIsArray } from '@superset-ui/core';
 import { RangePicker } from '@superset-ui/core/components';
 import { Button, Space } from 'antd';
@@ -36,7 +37,7 @@ type PickerValue = [Dayjs | null, Dayjs | null] | null;
  * Period ranges native filter: 1-5 equal-length date ranges. Emits a
  * tagged OR adhoc clause (multi-range filtering for every chart in scope)
  * and the structured ranges in custom_form_data (consumed by the period
- * comparison chart).
+ * comparison chart). The picker state persists in the filter's ownState.
  */
 export default function PeriodRangesFilterPlugin(
   props: PluginFilterPeriodRangesProps,
@@ -46,6 +47,7 @@ export default function PeriodRangesFilterPlugin(
     formData,
     height,
     width,
+    ownState,
     setDataMask,
     setHoveredFilter,
     unsetHoveredFilter,
@@ -54,6 +56,7 @@ export default function PeriodRangesFilterPlugin(
     setFilterActive,
     inputRef,
   } = props;
+  const theme = useTheme();
 
   const { groupby = [] } = formData;
   const [col = ''] = ensureIsArray(groupby);
@@ -65,6 +68,14 @@ export default function PeriodRangesFilterPlugin(
     [col, setDataMask],
   );
 
+  // picker state restored from the filter's persisted ownState
+  const persistedPeriods = (ownState as { periods?: PeriodRange[] } | undefined)
+    ?.periods;
+  const value = useMemo(
+    () => (Array.isArray(persistedPeriods) ? persistedPeriods : []),
+    [persistedPeriods],
+  );
+
   const {
     draft,
     validation,
@@ -73,7 +84,7 @@ export default function PeriodRangesFilterPlugin(
     onRangeChange,
     addPeriod,
     removePeriod,
-  } = usePeriodsList({ value: [], onCommit });
+  } = usePeriodsList({ value, onCommit });
 
   const { errors, warnings } = validationMessages(validation);
   const hasIssues = errors.length > 0 || warnings.length > 0;
@@ -166,12 +177,12 @@ export default function PeriodRangesFilterPlugin(
         {hasIssues ? (
           <div role="alert" style={{ fontSize: 12, lineHeight: 1.4 }}>
             {errors.map(message => (
-              <div key={message} style={{ color: '#e0433c' }}>
+              <div key={message} style={{ color: theme.colorError }}>
                 {message}
               </div>
             ))}
             {warnings.map(message => (
-              <div key={message} style={{ color: '#cc8a24' }}>
+              <div key={message} style={{ color: theme.colorWarning }}>
                 {message}
               </div>
             ))}

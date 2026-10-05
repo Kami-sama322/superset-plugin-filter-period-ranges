@@ -65,15 +65,45 @@ export type DataMaskLike = {
 
 const toIso = (ms: number): string => new Date(ms).toISOString();
 
+/**
+ * Merge overlapping and adjacent ranges into a sorted disjoint set.
+ *
+ * The user's periods stay untouched for the comparison chart (they are
+ * rendered as separate lines), but the SQL predicate for the other charts
+ * benefits: fewer OR branches, no redundant index scans over overlapping
+ * intervals, and a deterministic clause. Semantics are preserved — a row
+ * inside two overlapping ranges matches the union either way.
+ */
+export function mergeRanges(
+  periods: Parameters<typeof spanFilterValue>[0],
+): { startMs: number; endExclusiveMs: number }[] {
+  const bounds = periods
+    .map(period => ({
+      startMs: period.startMs,
+      endExclusiveMs: snapEndExclusiveMs(period.endMs, "day"),
+    }))
+    .sort((a, b) => a.startMs - b.startMs);
+  const merged: { startMs: number; endExclusiveMs: number }[] = [];
+  for (const bound of bounds) {
+    const last = merged[merged.length - 1];
+    if (last && bound.startMs <= last.endExclusiveMs) {
+      last.endExclusiveMs = Math.max(last.endExclusiveMs, bound.endExclusiveMs);
+    } else {
+      merged.push({ ...bound });
+    }
+  }
+  return merged;
+}
+
 /** Tagged OR clause consumed by every in-scope chart's query builder */
 export function buildTaggedRangesClause(
   col: string,
   periods: Parameters<typeof spanFilterValue>[0],
 ): string {
-  const clauses = periods.map(
-    period =>
-      `(${col} >= '${toUtcSqlString(period.startMs)}' AND ${col} < '${toUtcSqlString(
-        snapEndExclusiveMs(period.endMs, "day"),
+  const clauses = mergeRanges(periods).map(
+    bound =>
+      `(${col} >= '${toUtcSqlString(bound.startMs)}' AND ${col} < '${toUtcSqlString(
+        bound.endExclusiveMs,
       )}')`,
   );
   return `${PERIOD_RANGES_TAG} ${clauses.join(" OR ")}`;
@@ -81,7 +111,8 @@ export function buildTaggedRangesClause(
 
 /**
  * Full data mask of the filter. Empty/invalid periods clear the filter
- * (NO_TIME_RANGE) but keep the picker state in ownState.
+ * (NO_TIME_RANGE) but keep the picker state in ownState so it survives
+ * dashboard reloads.
  */
 export function buildPeriodRangesMask(
   periods: PeriodRange[],
@@ -95,7 +126,8 @@ export function buildPeriodRangesMask(
     end: toIso(period.endMs),
   }));
   return {
-    ownState: {},
+    // persisted picker state: the pickers restore from here on remount
+    ownState: { periods: periods.map(({ start, end }) => ({ start, end })) },
     extraFormData: {
       filters: [],
       adhoc_filters: valid
