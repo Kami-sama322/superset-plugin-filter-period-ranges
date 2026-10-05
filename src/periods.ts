@@ -345,16 +345,13 @@ export function extractFilterPeriods(extraFormData: unknown): PeriodRange[] {
  * - any native/cross filter emitting TEMPORAL_RANGE clauses (calendar,
  *   built-in time range, other charts),
  * - a time_range override (built-in Time range filter),
- * - simple clauses on THIS chart's own time column (e.g. the calendar
- *   filter's ==/>=/<= on the same temporal column).
+ * - any simple clause whose value parses as a date (the calendar filter's
+ *   ==/>=/<= on any column).
  *
  * This chart's own span (tagged) is intentionally NOT a signal — otherwise
  * the chart would defer to itself.
  */
-export function isDateFilterPresent(
-  extraFormData: unknown,
-  ownTimeColumn?: string,
-): boolean {
+export function isDateFilterPresent(extraFormData: unknown): boolean {
   const bag = (extraFormData || {}) as {
     custom_form_data?: unknown;
     filters?: unknown;
@@ -367,15 +364,11 @@ export function isDateFilterPresent(
   }
   if (Array.isArray(bag.filters)) {
     const hasDateClause = bag.filters.some(item => {
-      const clause = item as { op?: unknown; col?: unknown };
+      const clause = item as { op?: unknown; val?: unknown };
       if (clause?.op === "TEMPORAL_RANGE") {
         return true;
       }
-      return (
-        Boolean(ownTimeColumn) &&
-        clause?.col === ownTimeColumn &&
-        ["==", ">=", "<=", ">", "<", "IN"].includes(clause.op as string)
-      );
+      return parsePeriodMs(clause?.val) !== null;
     });
     if (hasDateClause) {
       return true;
@@ -396,6 +389,77 @@ export function isDateFilterPresent(
     return true;
   }
   return false;
+}
+
+/**
+ * The date range actually applied by dashboard date filters, as seen by
+ * this chart: any simple clause whose value parses as a date (regardless
+ * of the column it targets), TEMPORAL_RANGE clauses, or a time_range
+ * override with absolute bounds. Null when nothing parseable is applied.
+ */
+export function extractAppliedDateRange(extraFormData: unknown): {
+  startMs: number;
+  endMs: number;
+} | null {
+  const bag = (extraFormData || {}) as {
+    filters?: unknown;
+    time_range?: unknown;
+    extras?: { time_range?: unknown };
+  };
+  const lower: number[] = [];
+  const upper: number[] = [];
+  const parseBound = (value: unknown): number | null => {
+    if (typeof value !== "string") {
+      return null;
+    }
+    return parsePeriodMs(value);
+  };
+  if (Array.isArray(bag.filters)) {
+    bag.filters.forEach(item => {
+      const clause = item as { op?: unknown; val?: unknown };
+      if (clause?.op === "TEMPORAL_RANGE") {
+        const [s, e] = typeof clause.val === "string" ? clause.val.split(" : ") : [];
+        const start = parseBound(s);
+        const end = parseBound(e);
+        if (start !== null && end !== null) {
+          lower.push(start);
+          upper.push(end);
+        }
+        return;
+      }
+      const bound = parseBound(clause?.val);
+      if (bound === null) {
+        return;
+      }
+      if (clause.op === "==" || clause.op === ">=" || clause.op === ">") {
+        lower.push(bound);
+        if (clause.op === "==") {
+          upper.push(bound);
+        }
+      } else if (clause.op === "<=" || clause.op === "<") {
+        upper.push(bound);
+      }
+    });
+  }
+  const timeRange =
+    typeof bag.time_range === "string"
+      ? bag.time_range
+      : typeof bag.extras?.time_range === "string"
+        ? bag.extras.time_range
+        : null;
+  if (timeRange) {
+    const [s, e] = timeRange.split(" : ");
+    const start = parseBound(s);
+    const end = parseBound(e);
+    if (start !== null && end !== null) {
+      lower.push(start);
+      upper.push(end);
+    }
+  }
+  if (lower.length === 0 || upper.length === 0) {
+    return null;
+  }
+  return { startMs: Math.min(...lower), endMs: Math.max(...upper) };
 }
 
 /** Remove ALL tagged date-filter clauses (foreign + this chart's own span) */
@@ -427,7 +491,6 @@ export function resolvePeriodsSource(
   ownState: { periods?: unknown } | null | undefined,
   formPeriods: unknown,
   extraFormData: unknown = null,
-  ownTimeColumn?: string,
 ): { periods: PeriodRange[]; source: PeriodsSource } {
   const structured = extractFilterPeriods(extraFormData);
   if (structured.length > 0) {
@@ -436,7 +499,7 @@ export function resolvePeriodsSource(
   const formPeriodsList = Array.isArray(formPeriods)
     ? (formPeriods as PeriodRange[])
     : [];
-  if (isDateFilterPresent(extraFormData, ownTimeColumn)) {
+  if (isDateFilterPresent(extraFormData)) {
     // another date filter governs the window; the comparison periods stay
     // the chart's own configured ones (ownState is ignored — its pickers
     // are hidden)
