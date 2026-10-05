@@ -96,6 +96,19 @@ export default function PeriodRangesFilterPlugin(
     }
   }, [ownState, col, setDataMask]);
 
+  // "Clear all" resets filterState/extra_form_data but keeps our persisted
+  // ownState — without this the pickers would keep stale ranges while the
+  // dashboard is already unfiltered. Reset the picker state too.
+  useEffect(() => {
+    if (filterState?.value != null) {
+      return;
+    }
+    const persisted = (ownState as { periods?: unknown } | undefined)?.periods;
+    if (Array.isArray(persisted) && persisted.length > 0) {
+      setDataMask(buildPeriodRangesMask([], col));
+    }
+  }, [filterState, ownState, col, setDataMask]);
+
   const { errors, warnings } = validationMessages(validation);
   const hasIssues = errors.length > 0 || warnings.length > 0;
 
