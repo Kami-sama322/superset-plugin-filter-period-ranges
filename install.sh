@@ -75,11 +75,19 @@ else
   ok "Импорт добавлен в $EXTRA_FILE"
 fi
 
-if grep -q "period_ranges" "$EXTRA_FILE"; then
+if grep -q "PeriodRangesFilterPlugin().configure" "$EXTRA_FILE"; then
   warn "Регистрация плагина уже есть в $EXTRA_FILE"
-else
+elif grep -q "export default function setupPluginsExtra() {}" "$EXTRA_FILE"; then
   sed -i "s/export default function setupPluginsExtra() {}/export default function setupPluginsExtra() {\n  new PeriodRangesFilterPlugin().configure({ key: 'period_ranges' }).register();\n}/" "$EXTRA_FILE"
-  ok "Регистрация (configure + register) добавлена в $EXTRA_FILE"
+  ok "Регистрация (configure + register) добавлена"
+elif grep -q "export default function setupPluginsExtra() {" "$EXTRA_FILE"; then
+  sed -i "/export default function setupPluginsExtra() {/a\\  new PeriodRangesFilterPlugin().configure({ key: 'period_ranges' }).register();" "$EXTRA_FILE"
+  ok "Регистрация (configure + register) добавлена в непустую функцию"
+else
+  error "Не удалось найти setupPluginsExtra() — зарегистрируйте плагин вручную:"
+  echo "  import PeriodRangesFilterPlugin from '@superset-ui/plugin-filter-period-ranges';"
+  echo "  new PeriodRangesFilterPlugin().configure({ key: 'period_ranges' }).register();"
+  exit 1
 fi
 
 if [ ! -f "$TSCONFIG_FILE" ]; then
