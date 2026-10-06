@@ -112,16 +112,6 @@ export default function PeriodRangesFilterPlugin(
   const { errors, warnings } = validationMessages(validation);
   const hasIssues = errors.length > 0 || warnings.length > 0;
 
-  const formItemData = useMemo(() => {
-    if (filterState.validateStatus === 'error') {
-      return {
-        validateStatus: 'error' as const,
-        help: filterState.validateMessage,
-      };
-    }
-    return {};
-  }, [filterState.validateMessage, filterState.validateStatus]);
-
   const statusMessage = useMemo(() => {
     if (filterState.validateStatus !== 'error') {
       return null;

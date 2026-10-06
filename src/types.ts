@@ -18,7 +18,6 @@
  */
 import { Behavior, DataRecord, FilterState, QueryFormData, SetDataMaskHook, JsonObject } from '@superset-ui/core';
 import { RefObject } from 'react';
-import type { PeriodRange } from './periods';
 
 export enum FilterBarOrientation {
   Vertical = 'VERTICAL',
@@ -61,7 +60,6 @@ export type PluginFilterPeriodRangesProps = PluginFilterStylesProps & {
   isOverflowingFilterBar?: boolean;
 } & PluginFilterHooks;
 
-export type { PeriodRange };
 
 export const DEFAULT_FORM_DATA: PluginFilterPeriodRangesCustomizeProps = {
   enableEmptyFilter: false,
