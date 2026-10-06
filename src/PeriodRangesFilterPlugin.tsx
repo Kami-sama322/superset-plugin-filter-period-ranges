@@ -84,7 +84,7 @@ export default function PeriodRangesFilterPlugin(
     onRangeChange,
     addPeriod,
     removePeriod,
-  } = usePeriodsList({ value, onCommit });
+  } = usePeriodsList({ value, onCommit, allowEmpty: true });
 
   // Re-assert the presence marker after a framework reset (Clear all,
   // dashboard load): comparison charts in scope must keep deferring to
