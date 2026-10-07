@@ -22,6 +22,7 @@
 - "Filter value is required" checkbox: blocks applying the filter until at least one range is selected; without it the pickers can be removed down to zero — an empty set simply does not filter
 - Structured channel for the Period Comparison chart: the ranges are additionally emitted in `extra_form_data.custom_form_data` and the chart's pickers are replaced by a plaque when the filter is in scope; a presence-only marker is emitted even while no ranges are selected — "Clear all" never brings the chart's pickers back while the filter exists
 - Scope — standard native-filter scoping UI (all charts or a subset)
+- Ships a Jinja addon (`jinja_addon/`) that labels dataset rows with the selected periods — standard Table / Pivot Table charts can aggregate per period (see [Jinja addon for virtual datasets](#jinja-addon-for-virtual-datasets))
 
 ---
 
@@ -130,7 +131,9 @@ export SUPERSET_CONFIG_PATH=/path/to/superset-plugin-filter-period-ranges/supers
 
 The plugin loads no external resources — no CSP exceptions are required.
 The `superset_config.py` shipped in the repo is only a convenient dev setup
-(DEBUG, `DASHBOARD_NATIVE_FILTERS` / `DASHBOARD_CROSS_FILTERING` flags).
+(DEBUG, `DASHBOARD_NATIVE_FILTERS` / `DASHBOARD_CROSS_FILTERING` flags) and
+already wires the bundled Jinja addon `jinja_addon/` — see
+[Jinja addon for virtual datasets](#jinja-addon-for-virtual-datasets).
 
 ### Step 7–10. Database and admin
 
@@ -224,6 +227,83 @@ filterState: { value: '2026-01-05 00:00:00 : 2026-02-07 00:00:00' },
 
 ---
 
+## Jinja addon for virtual datasets
+
+Standard Table / Pivot Table charts cannot produce "one row per period":
+the filter reaches them only as a WHERE clause, which restricts rows but
+does not label them. This repo ships a Jinja addon — `jinja_addon/` — that
+reads the filter's structured channel (`custom_form_data`) on the backend
+and returns a CASE expression labeling every row with the period covering
+it, so a Table chart with dimension = `period` aggregates rows **per
+period** and any metrics as columns.
+
+**Requires** the `ENABLE_TEMPLATE_PROCESSING` feature flag.
+
+### Install
+
+1. Copy `jinja_addon/` next to your `superset_config.py` (Docker stand:
+   mount it to `/app/pythonpath/jinja_addon`).
+2. In `superset_config.py`:
+
+```python
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from jinja_addon.period_ranges import JINJA_CONTEXT_ADDONS as PERIOD_RANGES_ADDONS
+
+FEATURE_FLAGS = {
+    # ...
+    "ENABLE_TEMPLATE_PROCESSING": True,
+}
+JINJA_CONTEXT_ADDONS = {**PERIOD_RANGES_ADDONS}
+```
+
+The repo's own `superset_config.py` is already wired this way, and the
+Docker stand mounts `jinja_addon/` automatically.
+
+### Macros
+
+| Macro | Returns |
+|-------|---------|
+| `period_ranges('ts')` | `CASE WHEN ts >= 'S' AND ts < 'E' THEN 'S – E' … ELSE NULL END` — the period label per row; empty filter → `NULL` |
+| `period_ranges_where('ts')` | `(ts >= 'S' AND ts < 'E') OR …` — the WHERE fragment for pushing the filter into a subquery (window functions); empty filter → `''` |
+
+The argument must equal **the column chosen in the filter configuration**
+(matched against `custom_form_data.col`). Bounds replicate the filter's
+`snapEndExclusiveMs(end, "day")`, so the CASE always agrees with the tagged
+OR clause; `mergeRanges` guarantees each row matches exactly one branch.
+Any period length the filter allows works (day and up — the pickers are
+date-only).
+
+### Virtual dataset example
+
+```sql
+{% set _ = cache_key_wrapper(period_ranges_where('ts')) %}
+WITH FOR_FILTERS AS (
+    Select *
+        , {{ period_ranges('ts') }} AS period
+    from main.messages
+    where 1=1
+    {% if period_ranges_where('ts') %}
+      AND ({{ period_ranges_where('ts') }})
+    {% endif %}
+)
+
+SELECT *
+FROM FOR_FILTERS
+```
+
+- Table chart: dimension = `period`, metrics = `count(*)`, `sum(...)`, `max(...)`.
+- The `cache_key_wrapper` line is **required**: the validator's cache-key
+  pass only recognizes built-in macro names — without it different filter
+  selections share one cached result.
+- Empty filter → every label is `NULL` → one "N/A" row with totals over the
+  whole table (the filter is not applied); with **Filter value is required**
+  this state is blocked.
+
+---
+
 ## Package layout
 
 ```
@@ -239,6 +319,9 @@ superset-plugin-filter-period-ranges/
 │   ├── types.ts / common.ts / controlPanel.ts
 │   ├── images/thumbnail.png
 │   └── *.test.ts
+├── jinja_addon/                      # Jinja addon for virtual datasets
+│   ├── __init__.py
+│   └── period_ranges.py              # period_ranges / period_ranges_where macros
 ├── scripts/                        # standalone test runner (node strip-types)
 ├── package.json
 ├── install.sh

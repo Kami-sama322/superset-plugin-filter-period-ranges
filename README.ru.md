@@ -22,6 +22,7 @@
 - Чекбокс «Filter value is required»: запрещает применять фильтр, пока не выбран хотя бы один диапазон; без него пикеры можно удалять вплоть до нуля — пустой набор просто не фильтрует
 - Structured-канал для Period Comparison chart: диапазоны дополнительно эмитятся в `extra_form_data.custom_form_data`, и пикеры чарта заменяются плашкой, когда фильтр в скоупе; маркер присутствия эмитится даже без выбранных диапазонов — «Clear all» не возвращает пикеры чарта, пока фильтр существует
 - Скоуп — стандартный UI нативных фильтров (все чарты или выборочно)
+- Поставляет Jinja-аддон (`jinja_addon/`), размечающий строки датасета выбранными периодами — стандартные Table / Pivot Table чарты могут агрегировать по периодам (см. [Jinja-аддон для виртуальных датасетов](#jinja-аддон-для-виртуальных-датасетов))
 
 ---
 
@@ -128,7 +129,7 @@ pip install -r requirements/development.txt
 export SUPERSET_CONFIG_PATH=/path/to/superset-plugin-filter-period-ranges/superset_config.py
 ```
 
-Плагин не подгружает внешних ресурсов — CSP-исключения не требуются. `superset_config.py` из репозитория нужен только для удобной dev-среды (DEBUG, флаги `DASHBOARD_NATIVE_FILTERS` / `DASHBOARD_CROSS_FILTERING`).
+Плагин не подгружает внешних ресурсов — CSP-исключения не требуются. `superset_config.py` из репозитория нужен только для удобной dev-среды (DEBUG, флаги `DASHBOARD_NATIVE_FILTERS` / `DASHBOARD_CROSS_FILTERING`) и уже подключает Jinja-аддон `jinja_addon/` (см. [Jinja-аддон для виртуальных датасетов](#jinja-аддон-для-виртуальных-датасетов)).
 
 ### Шаги 7–10. База данных и администратор
 
@@ -222,6 +223,83 @@ filterState: { value: '2026-01-05 00:00:00 : 2026-02-07 00:00:00' },
 
 ---
 
+## Jinja-аддон для виртуальных датасетов
+
+Стандартные чарты Table / Pivot Table не умеют строить «одну строку на период»:
+фильтр доезжает до них только как WHERE-клауза, которая режет строки, но не
+размечает их. В репозитории есть Jinja-аддон — `jinja_addon/`: он читает
+structured-канал фильтра (`custom_form_data`) на бэкенде и возвращает
+CASE-выражение, размечающее каждую строку покрывающим её периодом, поэтому
+Table-чарт с dimension = `period` агрегирует строки **по периодам**, а метрики
+(`count(*)`, `sum(...)`, `max(...)`) идут колонками.
+
+**Требуется** флаг `ENABLE_TEMPLATE_PROCESSING`.
+
+### Установка
+
+1. Скопируйте `jinja_addon/` рядом с вашим `superset_config.py` (для Docker-стенда:
+   смонтируйте в `/app/pythonpath/jinja_addon`).
+2. В `superset_config.py`:
+
+```python
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from jinja_addon.period_ranges import JINJA_CONTEXT_ADDONS as PERIOD_RANGES_ADDONS
+
+FEATURE_FLAGS = {
+    # ...
+    "ENABLE_TEMPLATE_PROCESSING": True,
+}
+JINJA_CONTEXT_ADDONS = {**PERIOD_RANGES_ADDONS}
+```
+
+Собственный `superset_config.py` репозитория уже подключён таким образом, а
+Docker-стенд монтирует `jinja_addon/` автоматически.
+
+### Макросы
+
+| Макрос | Возвращает |
+|--------|------------|
+| `period_ranges('ts')` | `CASE WHEN ts >= 'S' AND ts < 'E' THEN 'S – E' … ELSE NULL END` — метка периода для каждой строки; пустой фильтр → `NULL` |
+| `period_ranges_where('ts')` | `(ts >= 'S' AND ts < 'E') OR …` — WHERE-фрагмент для заталкивания фильтра в подзапрос (оконные функции); пустой фильтр → `''` |
+
+Аргумент должен посимвольно совпадать с **колонкой, выбранной в конфигурации
+фильтра** (сравнение с `custom_form_data.col`). Границы повторяют
+`snapEndExclusiveMs(end, "day")` маски фильтра, поэтому CASE всегда согласован
+с tagged OR-клаузой; `mergeRanges` гарантирует, что каждая строка попадает ровно
+в одну ветку. Работает любая допустимая фильтром длина периода (день и крупнее —
+пикеры date-only).
+
+### Пример виртуального датасета
+
+```sql
+{% set _ = cache_key_wrapper(period_ranges_where('ts')) %}
+WITH FOR_FILTERS AS (
+    Select *
+        , {{ period_ranges('ts') }} AS period
+    from main.messages
+    where 1=1
+    {% if period_ranges_where('ts') %}
+      AND ({{ period_ranges_where('ts') }})
+    {% endif %}
+)
+
+SELECT
+* FROM FOR_FILTERS
+```
+
+- Table-чарт: dimension = `period`, метрики = `count(*)`, `sum(...)`, `max(...)`.
+- Строка `cache_key_wrapper` **обязательна**: проход сбора кэш-ключей знает
+  только встроенные имена макросов — без неё разные выборы фильтра попадают
+  в один закэшированный результат.
+- Пустой фильтр → все метки `NULL` → одна строка «N/A» с итогом по всей таблице
+  (фильтр не применён); с чекбоксом **Filter value is required** это состояние
+  заблокировано.
+
+---
+
 ## Структура пакета
 
 ```
@@ -237,6 +315,9 @@ superset-plugin-filter-period-ranges/
 │   ├── types.ts / common.ts / controlPanel.ts
 │   ├── images/thumbnail.png
 │   └── *.test.ts
+├── jinja_addon/                      # Jinja-аддон для виртуальных датасетов
+│   ├── __init__.py
+│   └── period_ranges.py              # макросы period_ranges / period_ranges_where
 ├── scripts/                        # standalone test runner (node strip-types)
 ├── package.json
 ├── install.sh

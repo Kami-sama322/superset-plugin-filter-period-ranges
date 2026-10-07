@@ -11,6 +11,8 @@ services:
       - SUPERSET_CONFIG_PATH=/app/pythonpath/superset_config.py
     volumes:
       - ./superset_config.py:/app/pythonpath/superset_config.py:ro
+      # Jinja-аддон period_ranges (макросы для виртуальных датасетов, см. README)
+      - ./jinja_addon:/app/pythonpath/jinja_addon:ro
       - superset_home:/app
     user: "root"
     command: >
