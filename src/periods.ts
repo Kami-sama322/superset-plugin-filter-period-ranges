@@ -121,12 +121,11 @@ function parseWallClock(value: string): number | null {
  * taken as-is.
  */
 export function parsePeriodEndMs(value: unknown): number | null {
-  if (
-    typeof value === "string" &&
-    DATE_ONLY_RE.test(value.trim()) &&
-    parseWallClock(value) !== null
-  ) {
-    return (parseWallClock(value) as number) + DAY_MS - 1;
+  if (typeof value === "string" && DATE_ONLY_RE.test(value.trim())) {
+    const parsed = parseWallClock(value);
+    if (parsed !== null) {
+      return parsed + DAY_MS - 1;
+    }
   }
   return parsePeriodMs(value);
 }

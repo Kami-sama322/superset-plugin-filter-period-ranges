@@ -58,6 +58,9 @@ test("valid periods emit one tagged OR clause and the structured ranges", () => 
   expect(mask.filterState.label).toContain("05.01");
   // the pickers restore from ownState after dashboard reloads
   expect(mask.ownState.periods).toEqual(periods);
+  // filterState mirrors ownState.periods for hosts without ownState
+  // (the default-value preview in the filter config modal)
+  expect(mask.filterState.periods).toEqual(periods);
 });
 
 test("an invalid set emits the presence marker and clears the filter", () => {
@@ -93,6 +96,23 @@ test("the presence marker works without a configured column too", () => {
   expect(mask.extraFormData.custom_form_data).toEqual([{ col: "" }]);
   expect(mask.filterState.value).toBeNull();
   expect(mask.ownState.periods).toEqual([]);
+});
+
+test("a schema-qualified column is applied as-is", () => {
+  const mask = buildPeriodRangesMask(periods, "events.dt");
+  expect(mask.extraFormData.adhoc_filters).toHaveLength(1);
+  expect(mask.extraFormData.custom_form_data[0].col).toBe("events.dt");
+});
+
+test("an unsafe column name degrades to the presence marker", () => {
+  const unsafe =
+    "ds); DROP TABLE users; --";
+  const mask = buildPeriodRangesMask(periods, unsafe);
+  expect(mask.extraFormData.adhoc_filters).toEqual([]);
+  expect(mask.extraFormData.custom_form_data).toEqual([{ col: "" }]);
+  expect(mask.filterState.value).toBeNull();
+  // the pickers keep the drafted periods regardless
+  expect(mask.ownState.periods).toEqual(periods);
 });
 
 test("buildTaggedRangesClause joins per-range clauses with OR", () => {

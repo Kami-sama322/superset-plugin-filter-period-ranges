@@ -31,7 +31,8 @@ export default function transformProps(chartProps: ChartProps) {
     filterState,
     inputRef,
     displaySettings,
-  } = chartProps;  const {
+  } = chartProps;
+  const {
     setDataMask = noOp,
     setHoveredFilter = noOp,
     unsetHoveredFilter = noOp,
@@ -46,6 +47,7 @@ export default function transformProps(chartProps: ChartProps) {
     height,
     formData: { ...DEFAULT_FORM_DATA, ...formData },
     ownState,
+    appSection: chartProps.appSection,
     setDataMask,
     setHoveredFilter,
     unsetHoveredFilter,

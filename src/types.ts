@@ -16,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { Behavior, DataRecord, FilterState, QueryFormData, SetDataMaskHook, JsonObject } from '@superset-ui/core';
+import { AppSection, Behavior, DataRecord, FilterState, QueryFormData, SetDataMaskHook, JsonObject } from '@superset-ui/core';
 import { RefObject } from 'react';
 
 export enum FilterBarOrientation {
@@ -56,6 +56,8 @@ export type PluginFilterPeriodRangesProps = PluginFilterStylesProps & {
   inputRef: RefObject<HTMLInputElement>;
   /** Persisted picker state (restored after dashboard reloads) */
   ownState: JsonObject;
+  /** Application section the filter is rendered in (dashboard / config modal) */
+  appSection?: AppSection;
   filterBarOrientation?: FilterBarOrientation;
   isOverflowingFilterBar?: boolean;
 } & PluginFilterHooks;

@@ -1,12 +1,11 @@
 /**
  * Module-resolution hooks for the standalone runner:
- * - bare @apache-superset/* imports map to local stubs (src must stay
- *   dependency-free to remain runnable here);
+ * - react and bare @apache-superset/* imports map to local stubs (pure
+ *   helper exports of hook modules stay runnable outside the tree);
  * - extensionless relative specifiers resolve to .ts files.
  */
-import { pathToFileURL } from "node:url";
-
 const STUBS = {
+  react: "stubs/react.mjs",
   "@superset-ui/core": "stubs/superset-core.mjs",
   "@superset-ui/chart-controls": "stubs/superset-core.mjs",
   "@apache-superset/core/translation": "stubs/translation.mjs",
@@ -16,8 +15,10 @@ const STUBS = {
 export async function resolve(specifier, context, next) {
   const stub = STUBS[specifier];
   if (stub) {
+    // import.meta.url is already a file URL — do not wrap with
+    // pathToFileURL, that would splice a "file:..." string into the cwd
     return {
-      url: pathToFileURL(new URL(stub, import.meta.url).href).href,
+      url: new URL(stub, import.meta.url).href,
       shortCircuit: true,
     };
   }

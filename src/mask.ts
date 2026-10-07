@@ -19,12 +19,17 @@
 
 import {
   formatPeriodLabel,
+  PERIOD_RANGES_TAG,
   snapEndExclusiveMs,
   spanFilterValue,
   toUtcSqlString,
   validatePeriods,
   type PeriodRange,
 } from "./periods";
+
+// single source of truth for the tag: periods.ts (the synced chart copy)
+// declares it too, so re-export instead of redefining
+export { PERIOD_RANGES_TAG };
 
 /**
  * The wire contract between this filter and the rest of the dashboard.
@@ -39,8 +44,6 @@ import {
  *   the periods.
  */
 
-export const PERIOD_RANGES_TAG = "/* period_ranges:v1 */";
-
 export type RangeEntry = {
   col: string;
   /** Inclusive range bound, ISO 8601 UTC */
@@ -48,6 +51,19 @@ export type RangeEntry = {
   /** Inclusive range bound, ISO 8601 UTC */
   end: string;
 };
+
+/**
+ * Column names that can be embedded as bare SQL identifiers (optionally
+ * schema-qualified). The tagged clause is a hand-written SQL string, so a
+ * hostile or malformed column name must never reach it.
+ */
+const SAFE_COLUMN_RE =
+  /^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)*$/;
+
+/** True when the column can be embedded into the tagged SQL clause as-is */
+export function isSafeSqlColumn(col: string): boolean {
+  return SAFE_COLUMN_RE.test(col);
+}
 
 export type DataMaskLike = {
   ownState: Record<string, unknown>;
@@ -60,7 +76,13 @@ export type DataMaskLike = {
     }[];
     custom_form_data: RangeEntry[];
   };
-  filterState: { value: string | null; label?: string };
+  filterState: {
+    value: string | null;
+    label?: string;
+    /** Portable mirror of ownState.periods: the default-value preview in
+     * the filter config modal never receives ownState */
+    periods?: PeriodRange[];
+  };
 };
 
 const toIso = (ms: number): string => new Date(ms).toISOString();
@@ -95,7 +117,11 @@ export function mergeRanges(
   return merged;
 }
 
-/** Tagged OR clause consumed by every in-scope chart's query builder */
+/**
+ * Tagged OR clause consumed by every in-scope chart's query builder.
+ * Callers must pass `isSafeSqlColumn(col)` — the column is embedded
+ * verbatim.
+ */
 export function buildTaggedRangesClause(
   col: string,
   periods: Parameters<typeof spanFilterValue>[0],
@@ -109,6 +135,12 @@ export function buildTaggedRangesClause(
   return `${PERIOD_RANGES_TAG} ${clauses.join(" OR ")}`;
 }
 
+/** Raw picker entry: only { start, end } survives persistence */
+const toRawPeriod = ({ start, end }: PeriodRange): PeriodRange => ({
+  start,
+  end,
+});
+
 /**
  * Full data mask of the filter. Empty/invalid periods emit a presence-only
  * marker entry (`{ col }` without dates) so that every period comparison
@@ -121,17 +153,14 @@ export function buildPeriodRangesMask(
   col: string | null | undefined,
 ): DataMaskLike {
   const { periods: validated } = validatePeriods(periods);
-  const valid = validated.length > 0 && Boolean(col);
-  const entries: RangeEntry[] = valid
-    ? validated.map(period => ({
-        col: col || "",
-        start: toIso(period.startMs),
-        end: toIso(period.endMs),
-      }))
-    : [{ col: col || "" }]; // presence-only marker (no dates)
+  // unsafe column names degrade to the presence marker (same as no
+  // column) instead of reaching the SQL string
+  const safeCol = col && isSafeSqlColumn(col) ? col : "";
+  const valid = validated.length > 0 && Boolean(safeCol);
+  const rawPeriods = periods.map(toRawPeriod);
   return {
     // persisted picker state: the pickers restore from here on remount
-    ownState: { periods: periods.map(({ start, end }) => ({ start, end })) },
+    ownState: { periods: rawPeriods },
     extraFormData: {
       filters: [],
       adhoc_filters: valid
@@ -139,20 +168,24 @@ export function buildPeriodRangesMask(
             {
               clause: "WHERE",
               expressionType: "SQL",
-              sqlExpression: buildTaggedRangesClause(
-                col as string,
-                validated,
-              ),
+              sqlExpression: buildTaggedRangesClause(safeCol, validated),
             },
           ]
         : [],
-      custom_form_data: entries,
+      custom_form_data: valid
+        ? validated.map(period => ({
+            col: safeCol,
+            start: toIso(period.startMs),
+            end: toIso(period.endMs),
+          }))
+        : [{ col: safeCol }], // presence-only marker (no dates)
     },
     filterState: {
       value: valid ? spanFilterValue(validated) : null,
       label: valid
         ? validated.map(formatPeriodLabel).join(", ")
         : undefined,
+      periods: rawPeriods,
     },
   };
 }

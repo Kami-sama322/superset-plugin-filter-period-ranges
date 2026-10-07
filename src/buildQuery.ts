@@ -17,7 +17,7 @@
  * under the License.
  */
 import { GenericDataType } from '@apache-superset/core/common';
-import { buildQueryContext, QueryFormData } from '@superset-ui/core';
+import { buildQueryContext, ensureIsArray, QueryFormData } from '@superset-ui/core';
 
 /**
  * The filter does not aggregate data itself; the query only fetches the
@@ -26,7 +26,7 @@ import { buildQueryContext, QueryFormData } from '@superset-ui/core';
  */
 export default function buildQuery(formData: QueryFormData) {
   const { groupby } = formData;
-  const [column = ''] = groupby || [];
+  const [column = ''] = ensureIsArray(groupby);
   // @ts-expect-error (need update interface Column )
   return buildQueryContext(formData, baseQueryObject => [
     {

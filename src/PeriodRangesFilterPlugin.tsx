@@ -16,10 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { t } from '@apache-superset/core/translation';
 import { useTheme } from '@apache-superset/core/theme';
-import { ensureIsArray } from '@superset-ui/core';
+import { AppSection, ensureIsArray } from '@superset-ui/core';
 import { RangePicker } from '@superset-ui/core/components';
 import { Button, Space } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -27,11 +27,16 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { FilterPluginStyle, StatusMessage } from './common';
 import { validationMessages } from './periodMessages';
 import { usePeriodsList } from './usePeriodsList';
-import { buildPeriodRangesMask } from './mask';
+import { buildPeriodRangesMask, isSafeSqlColumn } from './mask';
 import type { PeriodRange } from './periods';
 import type { PluginFilterPeriodRangesProps } from './types';
 
-type PickerValue = [Dayjs | null, Dayjs | null] | null;
+/** dayjs() is lenient: guard against corrupt persisted ownState values */
+const toDayjs = (value: string): Dayjs | null => {
+  // ternary, not `value &&` — a falsy string must become null, not itself
+  const parsed = value ? dayjs(value) : null;
+  return parsed?.isValid() ? parsed : null;
+};
 
 /**
  * Period ranges native filter: 1-5 equal-length date ranges. Emits a
@@ -48,6 +53,7 @@ export default function PeriodRangesFilterPlugin(
     height,
     width,
     ownState,
+    appSection,
     setDataMask,
     setHoveredFilter,
     unsetHoveredFilter,
@@ -58,7 +64,7 @@ export default function PeriodRangesFilterPlugin(
   } = props;
   const theme = useTheme();
 
-  const { groupby = [] } = formData;
+  const { groupby = [], enableEmptyFilter = false } = formData;
   const [col = ''] = ensureIsArray(groupby);
 
   const onCommit = useCallback(
@@ -68,14 +74,22 @@ export default function PeriodRangesFilterPlugin(
     [col, setDataMask],
   );
 
-  // picker state restored from the filter's persisted ownState
-  const persistedPeriods = (ownState as { periods?: PeriodRange[] } | undefined)
+  // picker state restored from the filter's persisted ownState; hosts that
+  // provide no ownState at all (the default-value preview in the filter
+  // config modal) fall back to the filterState.periods mirror
+  const ownStatePeriods = (ownState as { periods?: PeriodRange[] } | undefined)
     ?.periods;
+  const persistedPeriods =
+    ownStatePeriods ??
+    (filterState as { periods?: PeriodRange[] } | undefined)?.periods;
   const value = useMemo(
     () => (Array.isArray(persistedPeriods) ? persistedPeriods : []),
     [persistedPeriods],
   );
 
+  // "Filter value is required" (enableEmptyFilter) forbids an empty set:
+  // the last picker stays and empty lists are never committed. Default is
+  // optional (allowEmpty), matching the framework's checkbox semantics.
   const {
     draft,
     validation,
@@ -84,40 +98,64 @@ export default function PeriodRangesFilterPlugin(
     onRangeChange,
     addPeriod,
     removePeriod,
-  } = usePeriodsList({ value, onCommit, allowEmpty: true });
+  } = usePeriodsList({
+    value,
+    onCommit,
+    allowEmpty: !enableEmptyFilter,
+  });
 
   // Re-assert the presence marker after a framework reset (Clear all,
   // dashboard load): comparison charts in scope must keep deferring to
-  // this filter even while it has no ranges selected.
+  // this filter even while it has no ranges selected. The assert is
+  // dashboard-only: the default-value preview in the filter config modal
+  // (AppSection.FilterConfigModal) does not round-trip ownState, and an
+  // assert there would clobber the saved default with an empty marker.
+  // Even on the dashboard it runs at most once until ownState comes back
+  // as an array (a non-round-tripping host must never loop setDataMask).
+  const presenceAssertedRef = useRef(false);
+  const isConfigModalPreview = appSection === AppSection.FilterConfigModal;
   useEffect(() => {
-    const persisted = (ownState as { periods?: unknown } | undefined)?.periods;
-    if (!Array.isArray(persisted)) {
-      setDataMask(buildPeriodRangesMask([], col));
+    if (Array.isArray(ownStatePeriods)) {
+      // ownState round-trips: re-arm so a future reset re-asserts once
+      presenceAssertedRef.current = false;
+      return;
     }
-  }, [ownState, col, setDataMask]);
+    if (isConfigModalPreview || presenceAssertedRef.current) {
+      return;
+    }
+    presenceAssertedRef.current = true;
+    setDataMask(buildPeriodRangesMask([], col));
+  }, [isConfigModalPreview, ownStatePeriods, col, setDataMask]);
 
   // "Clear all" resets filterState/extra_form_data but keeps our persisted
   // ownState — without this the pickers would keep stale ranges while the
   // dashboard is already unfiltered. Reset the picker state too.
   useEffect(() => {
-    if (filterState?.value != null) {
-      return;
-    }
-    const persisted = (ownState as { periods?: unknown } | undefined)?.periods;
-    if (Array.isArray(persisted) && persisted.length > 0) {
+    if (
+      filterState?.value == null &&
+      Array.isArray(ownStatePeriods) &&
+      ownStatePeriods.length > 0
+    ) {
       setDataMask(buildPeriodRangesMask([], col));
     }
-  }, [filterState, ownState, col, setDataMask]);
+  }, [filterState, ownStatePeriods, col, setDataMask]);
 
   const { errors, warnings } = validationMessages(validation);
-  const hasIssues = errors.length > 0 || warnings.length > 0;
+  // the mask degrades to the presence marker for unsafe column names —
+  // surface that instead of failing silently
+  const columnWarning =
+    col && !isSafeSqlColumn(col)
+      ? t(
+          'Date column "%(col)s" is not a valid SQL identifier — the filter is not applied',
+          { col },
+        )
+      : null;
+  const allWarnings = columnWarning ? [...warnings, columnWarning] : warnings;
 
-  const statusMessage = useMemo(() => {
-    if (filterState.validateStatus !== 'error') {
-      return null;
-    }
-    return <StatusMessage>{filterState.validateMessage}</StatusMessage>;
-  }, [filterState.validateMessage, filterState.validateStatus]);
+  const statusMessage =
+    filterState.validateStatus === 'error' ? (
+      <StatusMessage>{filterState.validateMessage}</StatusMessage>
+    ) : null;
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -156,17 +194,14 @@ export default function PeriodRangesFilterPlugin(
         }}
       >
         {draft.map((period, index) => (
-          <Space key={index} size={4} style={{ width: '100%' }}>
+          <Space key={period.id} size={4} style={{ width: '100%' }}>
             <RangePicker
               ref={index === 0 ? inputRef : undefined}
               size="small"
               allowEmpty={[true, true]}
               format="DD.MM.YYYY"
               style={{ flex: '1 1 auto' }}
-              value={[
-                period.start ? dayjs(period.start) : null,
-                period.end ? dayjs(period.end) : null,
-              ]}
+              value={[toDayjs(period.start), toDayjs(period.end)]}
               onChange={values => onRangeChange(index, values)}
               onOpenChange={handleOpenChange}
               aria-label={t('Period %(index)s', { index: index + 1 })}
@@ -187,18 +222,18 @@ export default function PeriodRangesFilterPlugin(
             + {t('Period')}
           </Button>
         </div>
-        {hasIssues ? (
+        {errors.length > 0 || allWarnings.length > 0 ? (
           <div role="alert" style={{ fontSize: 12, lineHeight: 1.4 }}>
-            {errors.map(message => (
-              <div key={message} style={{ color: theme.colorError }}>
-                {message}
-              </div>
-            ))}
-            {warnings.map(message => (
-              <div key={message} style={{ color: theme.colorWarning }}>
-                {message}
-              </div>
-            ))}
+            {[
+              { items: errors, color: theme.colorError },
+              { items: allWarnings, color: theme.colorWarning },
+            ].map(({ items, color }) =>
+              items.map(message => (
+                <div key={message} style={{ color }}>
+                  {message}
+                </div>
+              )),
+            )}
           </div>
         ) : null}
       </div>

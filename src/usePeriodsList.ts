@@ -45,7 +45,52 @@ type Args = {
   allowEmpty?: boolean;
 };
 
-const serialize = (periods: PeriodRange[]) => JSON.stringify(periods);
+/** Draft entry: period + stable id used as the React list key */
+export type DraftPeriod = PeriodRange & { id: string };
+
+/** Factory of unique draft ids, one sequence per hook instance */
+export function createPeriodIdFactory(): () => string {
+  let counter = 0;
+  return () => `period-${(counter += 1)}`;
+}
+
+/** Stamp periods with fresh ids (draft rebuild) */
+export function withStableIds(
+  periods: PeriodRange[],
+  nextId: () => string,
+): DraftPeriod[] {
+  return periods.map(period => ({ ...period, id: nextId() }));
+}
+
+/** Content-only identity: draft ids must not participate in sync compares */
+export function serializePeriods(periods: PeriodRange[]): string {
+  return JSON.stringify(periods.map(({ start, end }) => ({ start, end })));
+}
+
+/**
+ * Commit gating: the toolbar only commits valid sets; the Explore control
+ * always emits so buildQuery can report the problem in the editor.
+ */
+export function shouldCommit(
+  validation: Validation,
+  {
+    commitInvalid = false,
+    allowEmpty = false,
+  }: { commitInvalid?: boolean; allowEmpty?: boolean } = {},
+): boolean {
+  if (commitInvalid) {
+    return true;
+  }
+  if (validation.errors.length > 0) {
+    return false;
+  }
+  return validation.periods.length > 0 || allowEmpty;
+}
+
+/** Draft ids are a rendering concern only — commit clean periods */
+export function stripDraftIds(draft: DraftPeriod[]): PeriodRange[] {
+  return draft.map(({ start, end }) => ({ start, end }));
+}
 
 const toIso = (value: Dayjs | null): string =>
   value ? value.format("YYYY-MM-DD") : "";
@@ -61,17 +106,23 @@ export function usePeriodsList({
   commitInvalid = false,
   allowEmpty = false,
 }: Args) {
-  const [draft, setDraft] = useState<PeriodRange[]>(value);
-  const lastSyncedRef = useRef<string>(serialize(value));
+  const nextId = useMemo(() => createPeriodIdFactory(), []);
+  const withIds = useCallback(
+    (periods: PeriodRange[]): DraftPeriod[] => withStableIds(periods, nextId),
+    [nextId],
+  );
+
+  const [draft, setDraft] = useState<DraftPeriod[]>(() => withIds(value));
+  const lastSyncedRef = useRef<string>(serializePeriods(value));
 
   // keep the pickers in sync with externally applied state
   useEffect(() => {
-    const serialized = serialize(value);
+    const serialized = serializePeriods(value);
     if (serialized !== lastSyncedRef.current) {
       lastSyncedRef.current = serialized;
-      setDraft(value);
+      setDraft(withIds(value));
     }
-  }, [value]);
+  }, [value, withIds]);
 
   const validation: Validation = useMemo(
     () => validatePeriods(draft),
@@ -79,21 +130,15 @@ export function usePeriodsList({
   );
 
   const apply = useCallback(
-    (next: PeriodRange[]) => {
+    (next: DraftPeriod[]) => {
       setDraft(next);
-      const nextValidation = validatePeriods(next);
-      // the toolbar only commits valid sets; the Explore control always
-      // emits so buildQuery can report the problem in the editor
-      if (!commitInvalid) {
-        if (nextValidation.errors.length > 0) {
-          return;
-        }
-        if (nextValidation.periods.length === 0 && !allowEmpty) {
-          return;
-        }
+      if (
+        shouldCommit(validatePeriods(next), { commitInvalid, allowEmpty })
+      ) {
+        const committed = stripDraftIds(next);
+        lastSyncedRef.current = serializePeriods(committed);
+        onCommit(committed);
       }
-      lastSyncedRef.current = serialize(next);
-      onCommit(next);
     },
     [commitInvalid, allowEmpty, onCommit],
   );
@@ -104,6 +149,7 @@ export function usePeriodsList({
         draft.map((period, position) =>
           position === index
             ? {
+                ...period,
                 start: toIso(values?.[0] ?? null),
                 end: toIso(values?.[1] ?? null),
               }
@@ -118,14 +164,17 @@ export function usePeriodsList({
     if (draft.length >= MAX_PERIODS) {
       return;
     }
-    const last = draft[draft.length - 1];
-    apply([...draft, last ? { ...last } : { start: "", end: "" }]);
-  }, [draft, apply]);
+    // a new picker starts as a copy of the last one (blank on empty list)
+    apply([
+      ...draft,
+      { ...(draft[draft.length - 1] ?? { start: "", end: "" }), id: nextId() },
+    ]);
+  }, [draft, apply, nextId]);
 
   const removePeriod = useCallback(
     (index: number) => {
-      const minPickers = allowEmpty ? 0 : 1;
-      if (draft.length <= minPickers) {
+      // the last picker is removable only when empty sets are allowed
+      if (draft.length <= (allowEmpty ? 0 : 1)) {
         return;
       }
       apply(draft.filter((_, position) => position !== index));
