@@ -88,6 +88,16 @@ export type DataMaskLike = {
 const toIso = (ms: number): string => new Date(ms).toISOString();
 
 /**
+ * Inclusive upper bound as SQL: the last representable instant of the
+ * exclusive bound (endExclusiveMs - 1ms = 23:59:59.999) plus a microsecond
+ * suffix so microsecond-precision timestamp columns are fully covered by
+ * the `<=` comparison. Matches the calendar filter's inclusive-end
+ * contract (`col <= end`) that users expect.
+ */
+const toInclusiveEndSql = (endExclusiveMs: number): string =>
+  `${toUtcSqlString(endExclusiveMs - 1)}.999999`;
+
+/**
  * Merge overlapping and adjacent ranges into a sorted disjoint set.
  *
  * The user's periods stay untouched for the comparison chart (they are
@@ -119,8 +129,10 @@ export function mergeRanges(
 
 /**
  * Tagged OR clause consumed by every in-scope chart's query builder.
- * Callers must pass `isSafeSqlColumn(col)` — the column is embedded
- * verbatim.
+ * Inclusive-end contract: `(col >= 'S 00:00:00' AND col <= 'E 23:59:59.999999')`
+ * — semantically identical to the half-open form and visually matching the
+ * calendar filter. Callers must pass `isSafeSqlColumn(col)` — the column is
+ * embedded verbatim.
  */
 export function buildTaggedRangesClause(
   col: string,
@@ -128,7 +140,7 @@ export function buildTaggedRangesClause(
 ): string {
   const clauses = mergeRanges(periods).map(
     bound =>
-      `(${col} >= '${toUtcSqlString(bound.startMs)}' AND ${col} < '${toUtcSqlString(
+      `(${col} >= '${toUtcSqlString(bound.startMs)}' AND ${col} <= '${toInclusiveEndSql(
         bound.endExclusiveMs,
       )}')`,
   );

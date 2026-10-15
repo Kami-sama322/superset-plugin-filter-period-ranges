@@ -16,7 +16,7 @@
 
 - Dashboard Native Filter (not a chart)
 - Independent dashboard entity: added via *Edit → + Add filter → Period ranges filter*, rendered in the filter bar; not tied to any chart
-- Multi-range OR filtering: tables and any other chart in scope are filtered by `range1 OR range2 OR …`. Superset's native `TEMPORAL_RANGE` clauses are AND-combined, so the filter emits a single tagged adhoc SQL clause: `/* period_ranges:v1 */ (col >= 'S1' AND col < 'E1') OR (…)`
+- Multi-range OR filtering: tables and any other chart in scope are filtered by `range1 OR range2 OR …`. Superset's native `TEMPORAL_RANGE` clauses are AND-combined, so the filter emits a single tagged adhoc SQL clause: `/* period_ranges:v1 */ (col >= 'S1' AND col <= 'E1 23:59:59.999999') OR (…)` — both bounds are inclusive, matching the calendar filter's contract
 - Sargable clause: the predicate stays index-friendly (range scans / BitmapOr); overlapping and adjacent ranges are merged into a minimal disjoint set before emission, so the OR branches never grow with redundant conditions
 - Equal-length validation: all ranges must have the same duration (blocking, inline error); overlaps warn
 - "Filter value is required" checkbox: blocks applying the filter until at least one range is selected; without it the pickers can be removed down to zero — an empty set simply does not filter
@@ -211,7 +211,7 @@ extraFormData: {
   filters: [],                       // never used — simple clauses AND
   adhoc_filters: [{                  // tagged OR clause
     clause: 'WHERE', expressionType: 'SQL',
-    sqlExpression: "/* period_ranges:v1 */ (col >= 'S' AND col < 'E') OR …",
+    sqlExpression: "/* period_ranges:v1 */ (col >= 'S' AND col <= 'E 23:59:59.999999') OR …",
   }],
   custom_form_data: [                // structured ranges (comparison chart)
     { col, start, end }, …           // ISO 8601 UTC, inclusive bounds
@@ -266,12 +266,13 @@ Docker stand mounts `jinja_addon/` automatically.
 
 | Macro | Returns |
 |-------|---------|
-| `period_ranges('ts')` | `CASE WHEN ts >= 'S' AND ts < 'E' THEN 'S – E' … ELSE NULL END` — the period label per row; empty filter → `NULL` |
-| `period_ranges_where('ts')` | `(ts >= 'S' AND ts < 'E') OR …` — the WHERE fragment for pushing the filter into a subquery (window functions); empty filter → `''` |
+| `period_ranges('ts')` | `CASE WHEN ts >= 'S' AND ts <= 'E 23:59:59.999999' THEN 'S – E' … ELSE NULL END` — the period label per row; empty filter → `NULL` |
+| `period_ranges_where('ts')` | `(ts >= 'S' AND ts <= 'E 23:59:59.999999') OR …` — the WHERE fragment for pushing the filter into a subquery (window functions); empty filter → `''` |
 
 The argument must equal **the column chosen in the filter configuration**
 (matched against `custom_form_data.col`). Bounds replicate the filter's
-`snapEndExclusiveMs(end, "day")`, so the CASE always agrees with the tagged
+inclusive end (`col <= 'E 23:59:59.999999'`, i.e. `snapEndExclusiveMs(end, "day")`
+minus the last microsecond), so the CASE always agrees with the tagged
 OR clause; `mergeRanges` guarantees each row matches exactly one branch.
 Any period length the filter allows works (day and up — the pickers are
 date-only).

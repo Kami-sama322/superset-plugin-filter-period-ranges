@@ -37,8 +37,8 @@ test("valid periods emit one tagged OR clause and the structured ranges", () => 
   expect(clause.expressionType).toBe("SQL");
   expect(clause.sqlExpression).toContain(PERIOD_RANGES_TAG);
   expect(clause.sqlExpression).toBe(
-    `${PERIOD_RANGES_TAG} (ds >= '2026-01-05 00:00:00' AND ds < '2026-01-10 00:00:00') OR ` +
-      `(ds >= '2026-02-02 00:00:00' AND ds < '2026-02-07 00:00:00')`,
+    `${PERIOD_RANGES_TAG} (ds >= '2026-01-05 00:00:00' AND ds <= '2026-01-09 23:59:59.999999') OR ` +
+      `(ds >= '2026-02-02 00:00:00' AND ds <= '2026-02-06 23:59:59.999999')`,
   );
   expect(mask.extraFormData.custom_form_data).toEqual([
     {
@@ -120,7 +120,7 @@ test("buildTaggedRangesClause joins per-range clauses with OR", () => {
     { startMs: Date.UTC(2026, 0, 5), endMs: Date.UTC(2026, 0, 9, 23, 59, 59, 999) },
   ]);
   expect(clause).toBe(
-    `${PERIOD_RANGES_TAG} (events.dt >= '2026-01-05 00:00:00' AND events.dt < '2026-01-10 00:00:00')`,
+    `${PERIOD_RANGES_TAG} (events.dt >= '2026-01-05 00:00:00' AND events.dt <= '2026-01-09 23:59:59.999999')`,
   );
 });
 
@@ -166,7 +166,7 @@ test("the emitted clause uses merged ranges", () => {
     { startMs: Date.UTC(2026, 0, 10), endMs: Date.UTC(2026, 0, 12, 23, 59, 59, 999) },
   ]);
   expect(clause).toBe(
-    `${PERIOD_RANGES_TAG} (ds >= '2026-01-05 00:00:00' AND ds < '2026-01-13 00:00:00')`,
+    `${PERIOD_RANGES_TAG} (ds >= '2026-01-05 00:00:00' AND ds <= '2026-01-12 23:59:59.999999')`,
   );
 });
 
@@ -176,6 +176,6 @@ test("overlapping periods produce a merged clause", () => {
     { startMs: Date.UTC(2026, 0, 7), endMs: Date.UTC(2026, 0, 9, 23, 59, 59, 999) },
   ]);
   expect(clause).toBe(
-    `${PERIOD_RANGES_TAG} (ds >= '2026-01-05 00:00:00' AND ds < '2026-01-13 00:00:00')`,
+    `${PERIOD_RANGES_TAG} (ds >= '2026-01-05 00:00:00' AND ds <= '2026-01-12 23:59:59.999999')`,
   );
 });
